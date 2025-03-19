@@ -9,7 +9,6 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import groq
 import os
-
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
