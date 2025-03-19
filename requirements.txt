@@ -1,0 +1,11 @@
+Flask
+flask-cors
+chromadb
+tiktoken
+pypdf
+sentence-transformers
+transformers
+torch
+groq
+scikit-learn
+datasets
