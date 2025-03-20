@@ -1,4 +1,4 @@
-⚖️ Verdicta - AI Legal Assistant
+##⚖️ Verdicta - AI Legal Assistant
 
 Verdicta is an advanced AI-powered legal assistant designed to assist with document analysis, contract review, legal research, and compliance checking. It integrates NLP, machine learning, and deep learning techniques to provide customized legal insights. 🚀
 
