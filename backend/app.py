@@ -1,14 +1,13 @@
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 import chromadb
-import tiktoken
 import pypdf
 from sentence_transformers import SentenceTransformer
 import logging
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
-import groq
 import os
+import ollama
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -33,23 +32,12 @@ try:
 except Exception as e:
     logger.error(f"Error loading Sentence Transformer model: {e}")
 
-# Load Fine-Tuned GPT-2 Model
-MODEL_PATH = "C:/Users/DELL/OneDrive/Desktop/chat1/backend/legal-finetuned-gpt2"
-
+# Load LLaMA 3 Model via Ollama
 try:
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-    model = AutoModelForCausalLM.from_pretrained(MODEL_PATH)
-    logger.info("Fine-tuned GPT-2 model loaded successfully.")
+    ollama.pull("llama3")
+    logger.info("LLaMA 3 model loaded successfully.")
 except Exception as e:
-    logger.error(f"Error loading fine-tuned model: {e}")
-
-# Initialize Groq client
-GROQ_API_KEY = "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"
-try:
-    groq_client = groq.Client(api_key=GROQ_API_KEY)
-    logger.info("Groq client initialized successfully.")
-except Exception as e:
-    logger.error(f"Error initializing Groq client: {e}")
+    logger.error(f"Error loading LLaMA 3 model: {e}")
 
 # Extract Text from PDF
 def extract_text_from_pdf(file):
@@ -89,43 +77,16 @@ def upload_pdf():
         logger.error(f"Error processing file: {e}")
         return jsonify({"error": f"Error processing file: {str(e)}"}), 500
 
-# Generate Response from Fine-Tuned Model (Legal Queries)
-def generate_local_response(prompt):
+# Generate Response from LLaMA 3
+def generate_llama_response(prompt):
     try:
-        inputs = tokenizer(prompt, return_tensors="pt")
-
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_length=150,
-                num_return_sequences=1,   
-                temperature=0.7,          
-                top_p=0.9,                
-                top_k=50,                 
-                repetition_penalty=1.2     
-            )
-        
-        response = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-
-        # If model generates an error-like response, return None
-        if not response or "error" in response.lower() or "sorry" in response.lower():
-            return None
-
-        return response
-    except Exception as e:
-        logger.error(f"Error generating response: {e}")
-        return None
-
-# Generate Response from Groq API
-def generate_groq_response(prompt):
-    try:
-        response = groq_client.chat.completions.create(
-            model="llama3-70b-8192",
+        response = ollama.chat(
+            model="llama3",
             messages=[{"role": "user", "content": prompt}]
         )
-        return response.choices[0].message.content
+        return response["message"]["content"]
     except Exception as e:
-        logger.error(f"Error getting response from Groq: {e}")
+        logger.error(f"Error generating response from LLaMA 3: {e}")
         return "I couldn't process your request. Please try again."
 
 @app.route("/query", methods=["POST"])
@@ -141,34 +102,21 @@ def query():
     pdf_text = session.get("pdf_text", "")
 
     try:
-        # If the question is casual, use Groq API only
-        if not any(keyword in user_question.lower() for keyword in ["law", "section", "punishment", "legal", "act", "penalty", "offense", "crime"]):
-            answer = generate_groq_response(user_question)
-        else:
-            # Retrieve relevant legal documents
-            results = collection.query(query_texts=[user_question], n_results=3)
-            retrieved_texts = [doc["text"] for doc in results["metadatas"][0] if "text" in doc] if "metadatas" in results and results["metadatas"] else []
-            doc_context = "\n".join(retrieved_texts) if retrieved_texts else "No additional documents found."
+        # Retrieve relevant legal documents
+        results = collection.query(query_texts=[user_question], n_results=3)
+        retrieved_texts = [doc["text"] for doc in results["metadatas"][0] if "text" in doc] if "metadatas" in results and results["metadatas"] else []
+        doc_context = "\n".join(retrieved_texts) if retrieved_texts else "No additional documents found."
 
-            # Format legal query with PDF text and context
-            prompt = (
-                f"User Question: {user_question}\n\n"
-                f"PDF Context:\n{pdf_text[:1000]}...\n\n"
-                f"Relevant Sections:\n{doc_context}\n\n"
-                f"Answer based on the provided legal documents and context."
-            )
+        # Format legal query with PDF text and context
+        prompt = (
+            f"User Question: {user_question}\n\n"
+            f"PDF Context:\n{pdf_text[:1000]}...\n\n"
+            f"Relevant Sections:\n{doc_context}\n\n"
+            f"Answer based on the provided legal documents and context."
+        )
 
-            # Get response from Fine-Tuned GPT-2
-            fine_tuned_response = generate_local_response(prompt)
-
-            # If fine-tuned model fails, show only Groq response
-            if fine_tuned_response is None:
-                answer = generate_groq_response(prompt)
-            else:
-                # Combine responses if both are available
-                groq_response = generate_groq_response(prompt)
-                answer = f"{fine_tuned_response} (Additional Groq Response: {groq_response})"
-
+        # Get response from LLaMA 3
+        answer = generate_llama_response(prompt)
         logger.info("Response generated successfully.")
         return jsonify({"answer": answer}), 200
 
