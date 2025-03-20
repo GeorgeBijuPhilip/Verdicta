@@ -59,10 +59,6 @@ const Chatbot = () => {
     }
   };
 
-  const truncateText = (text, maxTokens = 5000) => {
-    return text.split(' ').slice(0, maxTokens).join(' ');
-  };
-
   // Handle File Upload
   const handleFileChange = useCallback(async (e) => {
     const selectedFile = e.target.files[0];
@@ -89,11 +85,9 @@ const Chatbot = () => {
 
       setFilePreview({
         type: selectedFile.type,
-        content: URL.createObjectURL(selectedFile),
-        extractedText: truncateText(extractedText),
         name: selectedFile.name,
+        extractedText: extractedText,
       });
-
     } catch (error) {
       console.error('File processing error:', error);
       setError(error.message || 'Failed to process the file.');
@@ -109,15 +103,11 @@ const Chatbot = () => {
     setIsLoading(true);
 
     try {
-      const textToSend = truncateText(input.trim() || filePreview?.extractedText || '');
-
+      const textToSend = input.trim() || filePreview?.extractedText;
       const response = await fetch('http://localhost:8080/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: textToSend,
-          fileContent: filePreview?.extractedText || '',
-        }),
+        body: JSON.stringify({ question: textToSend }),
       });
 
       const result = await response.json();
@@ -127,7 +117,7 @@ const Chatbot = () => {
 
       setMessages((prevMessages) => [
         ...prevMessages,
-        { role: 'user', content: input },
+        { role: 'user', content: textToSend },
         { role: 'assistant', content: result.answer },
       ]);
     } catch (error) {
@@ -144,13 +134,6 @@ const Chatbot = () => {
     }
   }, [input, filePreview]);
 
-  const handleKeyDown = useCallback((e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  }, [handleSend]);
-
   return (
     <div className="chatbot-container">
       <h1 className="chatbot-title">AI Legal Assistant</h1>
@@ -161,31 +144,20 @@ const Chatbot = () => {
             <ReactMarkdown>{msg.content}</ReactMarkdown>
           </div>
         ))}
-        {isLoading && (
-          <div className="chatbot-message assistant">
-            <div className="typing-indicator"><span></span><span></span><span></span></div>
-          </div>
-        )}
       </div>
       <div className="chatbot-input-container">
-        {filePreview?.type === 'application/pdf' && (
-          <div className="notification">
-            PDF Uploaded: <strong>{filePreview.name}</strong>
-          </div>
-        )}
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
           placeholder="Type a message..."
           className="chatbot-input"
-          disabled={isLoading || isProcessingFile}
+          disabled={isLoading}
         />
         <button
           onClick={handleSend}
           className="chatbot-send-button"
-          disabled={isLoading || isProcessingFile}
+          disabled={isLoading}
         >
           {isLoading ? 'Sending...' : 'Send'}
         </button>
