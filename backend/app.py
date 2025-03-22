@@ -148,19 +148,20 @@ def query():
         if pdf_text:
             prompt = (
                 f"You are Verdicta, an AI assistant that provides clear and well-structured legal insights. "
-                f"You help users understand complex legal documents and answer their queries in a professional but approachable tone.\n\n"
-                f"### User Question:\n{user_question}\n\n"
-                f"### Uploaded Legal Document Content:\n{pdf_text[:1500]}...\n\n"
-                f"### Relevant Legal References:\n{doc_context}\n\n"
-                f"### Response Format:\n"
-                f"**1. Summary of the Legal Issue**\n"
-                f"**2. Key Legal Provisions & Their Meaning**\n"
-                f"**3. Steps the User Can Take**\n"
-                f"**4. Additional Resources for Further Help**\n\n"
-                f"Write in a professional yet conversational style, like ChatGPT would."
+        f"You help users understand complex legal documents and answer their queries in a professional but approachable tone.\n\n"
+        f"### User Question:\n{user_question}\n\n"
+        f"### Additional Instructions:\n{user_question}\n\n"
+        f"### Uploaded Legal Document Content:\n{pdf_text[:1500]}...\n\n"
+        f"### Relevant Legal References:\n{doc_context}\n\n"
+        f"### Response Format:\n"
+        f"**1. Summary of the Legal Issue**\n"
+        f"**2. Key Legal Provisions & Their Meaning**\n"
+        f"**3. Steps the User Can Take**\n"
+        f"**4. Additional Resources for Further Help**\n\n"
+        f"Write in a professional yet conversational style, like ChatGPT would."
             )
         else:
-            prompt = f"You are ChatGPT, a helpful AI assistant. Answer the following question in a clear and concise manner:\n\n{user_question}"
+            prompt = f"You are Verdicta, a helpful AI assistant. Answer the following question in a clear and concise manner and do not hallucinate also the first line will be a prompt so answer according to that prompt:\n\n{user_question}"
 
         return Response(stream_llama_response(prompt), content_type='text/event-stream; charset=utf-8')
     except Exception as e:
