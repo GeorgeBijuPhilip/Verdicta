@@ -9,6 +9,9 @@ import ollama
 import re
 import uuid
 from unidecode import unidecode
+from pdf2image import convert_from_bytes
+import pytesseract
+
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -16,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB limit
 app.secret_key = os.urandom(24)  # Secret key for session handling
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # Create upload folder if it doesn't exist
@@ -55,9 +59,10 @@ def extract_text_from_pdf(file):
     try:
         pdf_reader = pypdf.PdfReader(file)
         text = "\n".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
-        cleaned_text = clean_ocr_text(text)
-        logger.info("Text extracted and cleaned successfully from PDF.")
-        return cleaned_text
+        if not text:  # If pypdf fails, try OCR
+            images = convert_from_bytes(file.read())
+            text = "\n".join([pytesseract.image_to_string(img) for img in images])
+        return clean_ocr_text(text)
     except Exception as e:
         logger.error(f"Error extracting text from PDF: {e}")
         return None
