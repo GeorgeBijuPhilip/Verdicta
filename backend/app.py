@@ -151,7 +151,7 @@ def query():
         f"You help users understand complex legal documents and answer their queries in a professional but approachable tone.\n\n"
         f"### User Question:\n{user_question}\n\n"
         f"### Additional Instructions:\n{user_question}\n\n"
-        f"### The first line is always a query from the user you have to answer using the extracted text\n\n"
+        f"### The first line is always a query from the user you have to answer using the extracted text and remember the extracted text\n\n"
         f"### Uploaded Legal Document Content:\n{pdf_text[:1500]}...\n\n"
         f"### Relevant Legal References:\n{doc_context}\n\n"
         f"### Response Format:\n"
