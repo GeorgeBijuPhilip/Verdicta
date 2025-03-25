@@ -1,9 +1,9 @@
-
 import Chatbot from './pages/Chatbot'
 import LandingPage from './pages/LandingPage';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
+import './App.css'
 
 
  const App = () => {
