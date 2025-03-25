@@ -11,7 +11,8 @@ import uuid
 from unidecode import unidecode
 from pdf2image import convert_from_bytes
 import pytesseract
-
+import pandas as pd
+import openpyxl
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -38,7 +39,21 @@ try:
     logger.info("Sentence Transformer model loaded successfully.")
 except Exception as e:
     logger.error(f"Error loading Sentence Transformer model: {e}")
+try:
+    file_path = "/Users/athulkrishnagopakumar/Downloads/law_dataset.xlsx"
+    df = pd.read_excel(file_path) # Load your new dataset
 
+    texts_xlsx = df["Questions"].astype(str) + " " + df["Answers"].astype(str)
+    ids_xlsx = [str(uuid.uuid4()) for _ in range(len(texts_xlsx))]
+
+    embeddings_xlsx = model_embedding.encode(texts_xlsx.tolist()).tolist()
+    collection.add(ids=ids_xlsx, embeddings=embeddings_xlsx, metadatas=[{"text": t} for t in texts_xlsx])
+
+    logger.info("Additional Excel dataset embedded and stored in ChromaDB successfully!")
+    data = collection.get()
+    print(f"Stored document IDs: {data.get('ids', [])}")
+except Exception as e:
+    logger.error(f"Error processing additional Excel dataset: {e}")
 # Load LLaMA 3 Model via Ollama
 try:
     ollama.pull("llama3")
@@ -151,7 +166,7 @@ def query():
         f"You help users understand complex legal documents and answer their queries in a professional but approachable tone.\n\n"
         f"### User Question:\n{user_question}\n\n"
         f"### Additional Instructions:\n{user_question}\n\n"
-        f"### The first line is always a query from the user you have to answer using the extracted text\n\n"
+        f"### The first line is always a query from the user you have to answer using the extracted text and remember the extracted text\n\n"
         f"### Uploaded Legal Document Content:\n{pdf_text[:1500]}...\n\n"
         f"### Relevant Legal References:\n{doc_context}\n\n"
         f"### Response Format:\n"
