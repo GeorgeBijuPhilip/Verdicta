@@ -25,3 +25,9 @@ dist-ssr
 
 .env
 
+backend/chroma_db/chroma.sqlite3
+backend/chroma_db/chroma.sqlite3
+backend/chroma_db/8b4832ac-896b-4138-9d3b-d7174905b161/data_level0.bin
+backend/chroma_db/8b4832ac-896b-4138-9d3b-d7174905b161/header.bin
+backend/chroma_db/8b4832ac-896b-4138-9d3b-d7174905b161/index_metadata.pickle
+backend/chroma_db/8b4832ac-896b-4138-9d3b-d7174905b161/length.bin

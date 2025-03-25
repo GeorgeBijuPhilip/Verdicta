@@ -154,11 +154,18 @@ def query():
 
     try:
         results = collection.query(query_texts=[user_question], n_results=5)
-        retrieved_texts = [doc["text"] for doc in results["metadatas"][0] if "text" in doc] if "metadatas" in results and results["metadatas"] else []
+    
+        retrieved_texts = [doc["text"] for doc in results["metadatas"][0] if isinstance(doc, dict) and "text" in doc] if "metadatas" in results and results["metadatas"] else []
+    
         doc_context = "\n".join(retrieved_texts) if retrieved_texts else "No additional documents found."
+
+        print("\n🔍 Retrieved Documents:")
+        for doc in retrieved_texts:
+            print(f" - {doc[:300]}...\n")  # Print first 300 characters for debugging
 
         chat_history.append({"role": "user", "content": user_question})
         session["chat_history"] = chat_history
+
 
         if pdf_text:
             prompt = (
