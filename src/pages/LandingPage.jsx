@@ -92,7 +92,7 @@ const LandingPage = () => {
             boxShadow: "0 4px 30px rgba(255, 255, 255, 0.25)",
             borderRadius: "50px",
           }}
-          onClick={() => {navigate("/login")}}
+          onClick={() => {navigate("/signup")}}
         >
           Chat
         </motion.button>
