@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB limit
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  
 app.secret_key = os.urandom(24)  # Secret key for session handling
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # Create upload folder if it doesn't exist
