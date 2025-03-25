@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const LoginPage = () => {
@@ -54,7 +54,7 @@ const LoginPage = () => {
           </button>
         </form>
         <p style={styles.redirectText}>
-          Don't have an account? <a href="/signup" style={styles.link}>Sign Up</a>
+          Don&apos;t have an account? <a href="/signup" style={styles.link}>Sign Up</a>
         </p>
       </div>
     </div>
