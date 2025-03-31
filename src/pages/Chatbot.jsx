@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min?url";
+import { useNavigate } from "react-router-dom";
 import "./Chatbotstyles.css";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -9,11 +10,30 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 const Chatbot = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  // eslint-disable-next-line no-unused-vars
   const [files, setFiles] = useState([]);
   const [filePreview, setFilePreview] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [error, setError] = useState(null);
+  const messagesEndRef = useRef(null);
+  const navigate = useNavigate();
+
+  // Check if the user is logged in
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem("users")) || [];
+    const loggedInUser = user.find((u) => u.email); // Assuming the first user is the logged-in user
+    
+    if (!loggedInUser) {
+      // Redirect to signup if no valid user is found in localStorage
+      navigate("/signup");
+    }
+  }, [navigate]);
+
+  // Scroll to the bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const extractTextFromImage = (imageFile) => {
     return new Promise((resolve, reject) => {
@@ -122,26 +142,71 @@ const Chatbot = () => {
     }
   }, [input, filePreview]);
 
+  // Logout Function
+  const handleLogout = () => {
+    localStorage.removeItem("users"); // Remove all users from localStorage
+    navigate("/ "); // Redirect to signup page
+  };
+
   return (
     <div className="chatbot-container">
-      <h1 className="chatbot-title">AI Legal Assistant</h1>
+      {/* Logout Button */}
+      <button onClick={handleLogout} className="logout-button website-name">
+        Verdicta
+      </button>
+
       {error && <div className="error-message">{error}</div>}
-      <div className="chatbot-messages">
-        {messages.map((msg, index) => (
-          <div key={index} className={`chatbot-message ${msg.role}`}>
-            <ReactMarkdown>{msg.content}</ReactMarkdown>
-          </div>
-        ))}
+
+      {/* Message Container */}
+      <div className="message-container">
+        <div className="chatbot-messages">
+          {messages.map((msg, index) => (
+            <div key={index} className={`chatbot-message ${msg.role}`}>
+              <ReactMarkdown>{msg.content}</ReactMarkdown>
+            </div>
+          ))}
+          {/* Scroll anchor */}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
+
+      {/* Input Container */}
       <div className="chatbot-input-container">
-        <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type a message..." className="chatbot-input" disabled={isLoading} />
-        <button onClick={handleSend} className="chatbot-send-button" disabled={isLoading}>{isLoading ? "Sending..." : "Send"}</button>
-      </div>
-      <div className="file-upload-container">
-        <label className="file-upload-label">
-          {isProcessingFile ? "Processing..." : "Upload PDF/Image"}
-          <input type="file" accept=".pdf,image/*" onChange={handleFileChange} className="file-upload-input" disabled={isLoading || isProcessingFile} />
-        </label>
+        <div
+          className="file-upload-icon"
+          onClick={() => document.getElementById("file-upload-input").click()}
+          style={{ position: "absolute", left: "15px", top: "50%", transform: "translateY(-50%)" }}
+        >
+          <img src="/src/assets/attach1.png" alt="Upload Icon" style={{ width: "20px", height: "20px" }} />
+        </div>
+
+        {/* Text Input */}
+        <input
+          id="chatbot-input"
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Type a message..."
+          className="chatbot-input"
+          disabled={isLoading}
+          onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+        />
+
+        {/* Send Button */}
+        <button onClick={handleSend} className="chatbot-send-button" disabled={isLoading}>
+          {isLoading ? "Sending..." : "Send"}
+        </button>
+
+        {/* Hidden File Input */}
+        <input
+          id="file-upload-input"
+          type="file"
+          accept=".pdf,image/*"
+          onChange={handleFileChange}
+          className="file-upload-input"
+          disabled={isLoading || isProcessingFile}
+          style={{ display: "none" }}
+        />
       </div>
     </div>
   );
