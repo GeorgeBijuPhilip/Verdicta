@@ -55,7 +55,7 @@ const LandingPage = () => {
       {/* First Page (Hero Section) */}
       <div className="relative h-screen w-full overflow-hidden">
         {/* Navigation Bar */}
-        <nav className="absolute top-10 left-10 flex items-center space-x-8">
+        <nav className="absolute top-10 left-10 w-full flex items-center justify-between px-10 py-6 z-50">
           <h1 className="text-white text-[40px] font-[Italiana] tracking-wide">
             Verdicta
           </h1>

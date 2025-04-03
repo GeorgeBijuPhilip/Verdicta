@@ -99,41 +99,55 @@ const Chatbot = () => {
 
     setIsLoading(true);
     try {
-      const textToSend = input.trim();
+      const userPrompt = input.trim();
       const extractedTextFromFiles = filePreview.map((file) => file.extractedText).join("\n\n");
-      const combinedText = textToSend + (extractedTextFromFiles ? `\n\nExtracted Text:\n${extractedTextFromFiles}` : "");
-
+      
+      // Display in messages with clear separation
+      const displayText = userPrompt + (extractedTextFromFiles ? `\n\nExtracted Text:\n${extractedTextFromFiles}` : "");
       setMessages((prevMessages) => [
         ...prevMessages,
-        { role: "user", content: combinedText },
+        { role: "user", content: displayText },
         { role: "assistant", content: "" },
       ]);
+
+      // Combine prompt and extracted text for the backend
+      // Format: user prompt followed by extracted text
+      const combinedPrompt = userPrompt 
+        ? `${userPrompt}\n\nContext:\n${extractedTextFromFiles}`
+        : extractedTextFromFiles;
 
       const response = await fetch("http://localhost:8080/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: combinedText }),
+        body: JSON.stringify({ 
+          question: combinedPrompt
+        }),
       });
 
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
-      if (!response.body) throw new Error("No response body received.");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let assistantMessage = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        if (chunk.trim()) {
-          assistantMessage += chunk;
-          setMessages((prevMessages) => [...prevMessages.slice(0, -1), { role: "assistant", content: assistantMessage }]);
-        }
+      
+      const data = await response.json();
+      if (!data.response || !data.success) {
+        throw new Error("Invalid response from server");
       }
+
+      const formattedResponse = data.response
+        .replace(/\\n/g, '\n')
+        .split('\n')
+        .filter(line => line.trim())
+        .join('\n\n');
+
+      setMessages((prevMessages) => [
+        ...prevMessages.slice(0, -1),
+        { role: "assistant", content: formattedResponse },
+      ]);
+
     } catch (error) {
       console.error("Error fetching response:", error);
-      setMessages((prevMessages) => [...prevMessages.slice(0, -1), { role: "assistant", content: "⚠️ Something went wrong. Please try again!" }]);
+      setMessages((prevMessages) => [
+        ...prevMessages.slice(0, -1),
+        { role: "assistant", content: "⚠️ Something went wrong. Please try again!" },
+      ]);
     } finally {
       setIsLoading(false);
       setInput("");
@@ -146,6 +160,23 @@ const Chatbot = () => {
   const handleLogout = () => {
     localStorage.removeItem("users"); // Remove all users from localStorage
     navigate("/ "); // Redirect to signup page
+  };
+
+  const formatMessageContent = (content) => {
+    return content
+      .split('\n\n')
+      .map((paragraph, i) => {
+        if (paragraph.match(/^\d+\./)) {
+          // Numbered list
+          return `<div class="list-item numbered">${paragraph}</div>`;
+        } else if (paragraph.match(/^[•\*]/)) {
+          // Bullet list
+          return `<div class="list-item bulleted">${paragraph}</div>`;
+        }
+        // Regular paragraph
+        return `<div class="paragraph">${paragraph}</div>`;
+      })
+      .join('');
   };
 
   return (
@@ -162,7 +193,14 @@ const Chatbot = () => {
         <div className="chatbot-messages">
           {messages.map((msg, index) => (
             <div key={index} className={`chatbot-message ${msg.role}`}>
-              <ReactMarkdown>{msg.content}</ReactMarkdown>
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <div className="paragraph">{children}</div>,
+                }}
+                remarkPlugins={[]}
+              >
+                {msg.content}
+              </ReactMarkdown>
             </div>
           ))}
           {/* Scroll anchor */}
