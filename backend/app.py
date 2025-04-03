@@ -1,87 +1,74 @@
+# Standard library imports
+import os
+import re
+import uuid
+import logging
+import datetime
+from typing import Optional, Dict, List
+
+# Third-party imports
 from flask import Flask, request, jsonify, session, Response
 from flask_cors import CORS
+from dotenv import load_dotenv
 import chromadb
 import pypdf
 from sentence_transformers import SentenceTransformer
-import logging
-import os
-import ollama
-import re
-import uuid
 from unidecode import unidecode
 from pdf2image import convert_from_bytes
 import pytesseract
 import pandas as pd
-import openpyxl
 import requests
+from groq import Groq
+import ollama
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Flask app configuration
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  
-app.secret_key = os.urandom(24)  # Secret key for session handling
+CORS(app)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+app.secret_key = os.urandom(24)
+
+# Constants
 UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # Create upload folder if it doesn't exist
-chat_history = []  # Stores the last few interactions
-# Initialize ChromaDB
+HISTORY_FILE = "chat_history.txt"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Initialize services
 try:
     client = chromadb.PersistentClient(path="./chroma_db")
     collection = client.get_or_create_collection(name="legal_docs")
-    logger.info("ChromaDB initialized successfully.")
-except Exception as e:
-    logger.error(f"Error initializing ChromaDB: {e}")
-
-# Load Sentence Transformer Model for embeddings
-try:
     model_embedding = SentenceTransformer("all-MiniLM-L6-v2")
-    logger.info("Sentence Transformer model loaded successfully.")
-except Exception as e:
-    logger.error(f"Error loading Sentence Transformer model: {e}")
-try:
-    file_path = "/Users/athulkrishnagopakumar/Downloads/law_dataset.xlsx"
-    df = pd.read_excel(file_path) # Load your new dataset
-
-    texts_xlsx = df["Questions"].astype(str) + " " + df["Answers"].astype(str)
-    ids_xlsx = [str(uuid.uuid4()) for _ in range(len(texts_xlsx))]
-
-    embeddings_xlsx = model_embedding.encode(texts_xlsx.tolist()).tolist()
-    collection.add(ids=ids_xlsx, embeddings=embeddings_xlsx, metadatas=[{"text": t} for t in texts_xlsx])
-
-    logger.info("Additional Excel dataset embedded and stored in ChromaDB successfully!")
-    data = collection.get()
-    print(f"Stored document IDs: {data.get('ids', [])}")
-except Exception as e:
-    logger.error(f"Error processing additional Excel dataset: {e}")
-# Load LLaMA 3 Model via Ollama
-try:
     ollama.pull("llama3")
-    logger.info("LLaMA 3 model loaded successfully.")
+    logger.info("Services initialized successfully.")
 except Exception as e:
-    logger.error(f"Error loading LLaMA 3 model: {e}")
+    logger.error(f"Error initializing services: {e}")
 
-# Text Cleaning Function
-def clean_ocr_text(text):
+# Utility functions
+def clean_ocr_text(text: str) -> str:
     text = unidecode(text)
     text = re.sub(r'Pennit', 'Permit', text)
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'[^a-zA-Z0-9\s.,:/()-]', '', text)
     return text.strip()
-HISTORY_FILE = "chat_history.txt"
-# Extract Text from PDF
-def extract_text_from_pdf(file):
+
+def extract_text_from_pdf(file) -> Optional[str]:
     try:
         pdf_reader = pypdf.PdfReader(file)
         text = "\n".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
-        if not text:  # If pypdf fails, try OCR
+        if not text:
             images = convert_from_bytes(file.read())
             text = "\n".join([pytesseract.image_to_string(img) for img in images])
         return clean_ocr_text(text)
     except Exception as e:
         logger.error(f"Error extracting text from PDF: {e}")
         return None
+
 def load_history():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r") as f:
@@ -107,48 +94,69 @@ def generate_response(user_input):
     save_history(user_input, bot_response)
     
     return bot_response
-# Store PDF text in a temporary file instead of session
-@app.route("/upload", methods=["POST"])
-def upload_pdf():
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
 
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
+def should_use_local_model(prompt: str) -> bool:
+    """Determine if we should use local LLaMA model based on context"""
+    file_related_indicators = [
+        "Uploaded Legal Document Content" in prompt,
+        "pdf_text" in prompt.lower(),
+        "extracted text" in prompt.lower(),
+        "document analysis" in prompt.lower(),
+        "### Document Context:" in prompt,  # Added to catch file uploads explicitly
+        "File uploaded:" in prompt
+    ]
+    return any(file_related_indicators)
 
+def stream_llama_response(prompt: str) -> str:
     try:
-        text = extract_text_from_pdf(file)
-        if not text:
-            return jsonify({"error": "Failed to extract text from the file."}), 400
+        if should_use_local_model(prompt):
+            logger.info("Using local LLaMA model for file processing")
+            response = requests.post(
+                "http://127.0.0.1:11434/api/generate",
+                json={
+                    "model": "llama3",
+                    "prompt": (
+                        "You are an AI legal assistant. Provide direct, declarative responses without "
+                        "asking questions back. Be professional yet conversational, and focus on "
+                        "providing clear, actionable information.\n\n"
+                        f"{prompt}"
+                    ),
+                    "stream": False,
+                    "max_tokens": 2048,
+                    "temperature": 0.7
+                }
+            )
+            if response.status_code == 200:
+                return response.json().get("response", "Error processing with local model")
+            else:
+                logger.error(f"Error with local LLaMA: {response.text}")
+                return "Error processing with local model"
+        
+        else:
+            logger.info("Using Groq API for general query")
+            client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an AI legal assistant. Provide direct, declarative responses "
+                            "without asking questions back. Be professional yet conversational, and "
+                            "focus on providing clear, actionable information."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                model="llama-3.3-70b-versatile",
+            )
+            return chat_completion.choices[0].message.content
 
-        file_id = str(uuid.uuid4())
-        file_path = os.path.join(UPLOAD_FOLDER, f"{file_id}.txt")
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(text)
-
-        session["pdf_file_path"] = file_path
-        session.setdefault("chat_history", [])
-
-        return jsonify({"message": f"File '{file.filename}' uploaded successfully.", "file_id": file_id}), 200
     except Exception as e:
-        logger.error(f"Error processing file: {e}")
-        return jsonify({"error": f"Error processing file: {str(e)}"}), 500
-
-# Stream LLaMA Response to User
-def stream_llama_response(prompt):
-    try:
-        stream = ollama.chat(
-            model="llama3",
-            messages=[{"role": "user", "content": prompt}],
-            stream=True
-        )
-        for part in stream:
-            yield part["message"]["content"]
-    except Exception as e:
-        logger.error(f"Error streaming response: {e}")
-        yield "I couldn't process your request. Please try again."
+        logger.error(f"Error in stream_llama_response: {e}")
+        return f"Error processing request: {str(e)}"
 
 def store_chat_history(session_id, user_question, full_response):
     try:
@@ -163,7 +171,6 @@ def store_chat_history(session_id, user_question, full_response):
     except Exception as e:
         logger.error(f"Error storing chat history: {e}")
 
-
 def retrieve_chat_history(session_id, query):
     """Retrieves past chat history relevant to the new query"""
     try:
@@ -177,9 +184,142 @@ def retrieve_chat_history(session_id, query):
         logger.error(f"Error retrieving chat history: {e}")
         return ""
 
+# Add these new functions for chat history management
+def save_chat_message(session_id: str, role: str, content: str) -> bool:
+    try:
+        message_id = str(uuid.uuid4())
+        metadata = {
+            "session_id": session_id,
+            "role": role,
+            "timestamp": str(datetime.datetime.now()),
+            "content": content
+        }
+        
+        # Store in ChromaDB
+        collection.add(
+            ids=[message_id],
+            documents=[content],
+            metadatas=[metadata]
+        )
+        logger.info(f"Saved chat message: {metadata}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving chat message: {e}")
+        return False
+
+def get_chat_history(session_id, limit=10):
+    try:
+        # Query ChromaDB for messages from this session
+        results = collection.query(
+            query_texts=[f"session:{session_id}"],
+            where={"session_id": session_id},
+            n_results=limit
+        )
+        
+        # Sort messages by timestamp
+        messages = []
+        for metadata in results.get("metadatas", []):
+            if metadata:
+                messages.append({
+                    "role": metadata["role"],
+                    "content": metadata["content"],
+                    "timestamp": metadata["timestamp"]
+                })
+        
+        return sorted(messages, key=lambda x: x["timestamp"])
+    except Exception as e:
+        logger.error(f"Error retrieving chat history: {e}")
+        return []
+
+def format_response(text: str) -> str:
+    """Format the response text to be more readable and professional"""
+    try:
+        # Clean the text
+        text = text.strip()
+        
+        # Handle numbered lists - ensure proper spacing and formatting
+        text = re.sub(r'(\d+\.)\s*', r'\n\1 ', text)
+        
+        # Handle bullet points
+        text = re.sub(r'([•\*])\s*', r'\n• ', text)
+        
+        # Add proper spacing after greetings
+        text = re.sub(r'(Hello|Hi|Hey|Namaste)([^,.!?\n]*[,.!?])', r'\1\2\n\n', text)
+        
+        # Add paragraph breaks after sentences that end sections
+        text = re.sub(r'([.!?])\s+(?=[A-Z])', r'\1\n\n', text)
+        
+        # Clean up excessive newlines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # Ensure lists are properly spaced
+        text = re.sub(r'\n((?:\d+\.|\•)[^\n]+)(?:\n(?!\d+\.|\•|$))', r'\n\1\n\n', text)
+        
+        # Final cleanup
+        text = text.strip()
+        paragraphs = text.split('\n\n')
+        formatted_paragraphs = [p.strip() for p in paragraphs if p.strip()]
+        
+        return '\n\n'.join(formatted_paragraphs)
+        
+    except Exception as e:
+        logger.error(f"Error formatting response: {e}")
+        return text
+
+# Route handlers
+@app.route("/upload", methods=["POST"])
+def upload_pdf():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No selected file"}), 400
+
+    try:
+        text = extract_text_from_pdf(file)
+        if not text:
+            return jsonify({"error": "Failed to extract text from the file."}), 400
+
+        # Make it explicit that we're using local model for file processing
+        prompt = (
+            "You are an AI legal assistant processing an uploaded document. "
+            "Answer professionally while keeping a conversational tone.\n\n"
+            f"### File uploaded: {file.filename}\n"
+            f"### Document Context:\n{text[:1500]}...\n\n"
+            "Please analyze this legal document and provide a comprehensive summary."
+        )
+        
+        # This will automatically use local LLaMA due to should_use_local_model check
+        response = stream_llama_response(prompt)
+
+        # Split the text into lines and get the first line as the query
+        lines = text.split('\n')
+        query = lines[0].strip()
+        remaining_text = '\n'.join(lines[1:])
+
+        file_id = str(uuid.uuid4())
+        file_path = os.path.join(UPLOAD_FOLDER, f"{file_id}.txt")
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(remaining_text)
+
+        session["pdf_file_path"] = file_path
+        session.setdefault("chat_history", [])
+
+        return jsonify({
+            "message": f"File '{file.filename}' uploaded successfully.",
+            "file_id": file_id,
+            "query": query,
+            "response": response
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error processing file: {e}")
+        return jsonify({"error": f"Error processing file: {str(e)}"}), 500
+
 @app.route("/query", methods=["POST"])
 def query():
-    global chat_history
     data = request.get_json()
     user_question = data.get("question", "").strip()
     session_id = data.get("session_id", str(uuid.uuid4()))
@@ -187,119 +327,47 @@ def query():
     if not user_question:
         return jsonify({"error": "A question is required."}), 400
 
-    # ✅ Casual responses early exit
-    casual_responses = {
-        "hello": "Hey there! How can I assist you today?",
-        "good morning": "Good morning! How can I help you today?",
-        "good evening": "Good evening! What can I do for you?",
-        "thank you": "You're welcome! Let me know if there's anything else I can assist with.",
-        "bye": "Goodbye! Have a great day!",
-        "hey": "Hey there! How can I assist you today?",
-        "hi": "Hi! Need help with something?",
-        "how are you": "I'm just a chatbot, but I'm here to help! What do you need?",
-        "what's up": "Not much, just ready to assist! What’s on your mind?",
-        "who are you": "I'm an AI legal assistant, here to help with legal questions and documents!",
-    }
-
-    if user_question.lower() in casual_responses:
-        return jsonify({"answer": casual_responses[user_question.lower()]}), 200
-
-    # ✅ Load or initialize chat history
-    if "chat_history" not in session:
-        session["chat_history"] = []
-
-    chat_history = session["chat_history"][-5:]  # Keep last 5 messages for context
-    if "remember" in user_question.lower():
-        key_value = user_question.replace("remember", "").strip().split(" is ")
-        if len(key_value) == 2:
-            key, value = key_value
-            chat_history.append({"role": "memory", "content": f"{key.strip()} is {value.strip()}"})
-            session["chat_history"] = chat_history[-10:]  # Update session
-            return jsonify({"answer": f"Got it! I'll remember that {key.strip()} is {value.strip()}."})
-
-# ✅ Retrieve stored info
-    for msg in chat_history:
-        if msg["role"] == "memory" and any(word in user_question.lower() for word in msg["content"].split(" is ")[0].lower().split()):
-            key, value = msg["content"].split(" is ")
-            return jsonify({"answer": f"{key.capitalize()} is {value}!"})
-
-    if "what do you remember" in user_question.lower():
-        memories = [msg["content"] for msg in chat_history if msg["role"] == "memory"]
-        if memories:
-            return jsonify({"answer": f"Here's what I remember: {', '.join(memories)}."})
-        return jsonify({"answer": "I don't remember anything yet. Tell me something to remember!"})
-    pdf_file_path = session.get("pdf_file_path")
-    pdf_text = ""
-    if pdf_file_path and os.path.exists(pdf_file_path):
-        with open(pdf_file_path, "r", encoding="utf-8") as f:
-            pdf_text = f.read()
-
     try:
-        # ✅ Retrieve from RAG
-        results = collection.query(
-            query_texts=[user_question], n_results=3, include=["documents"], where={"category": "legal"}
-        )
-        retrieved_texts = [
-            doc for doc in results.get("documents", [[]])[0] if isinstance(doc, str)
-        ]
-        doc_context = "\n".join(retrieved_texts) if retrieved_texts else ""
-
-        # ✅ Maintain chat history structure properly
-        chat_history.append({"role": "user", "content": user_question})
-
-        # ✅ Construct better prompt including chat history
-        formatted_chat_history = "\n".join(
-            f"{msg['role'].capitalize()}: {msg['content']}" for msg in chat_history
-        )
+        save_chat_message(session_id, "user", user_question)
+        chat_history = get_chat_history(session_id)
+        
+        formatted_history = "\n".join([
+            f"{msg['role'].capitalize()}: {msg['content']}" 
+            for msg in chat_history[-5:]
+        ])
 
         prompt = (
             "You are an AI legal assistant. Answer professionally while keeping a conversational tone.\n\n"
-            f"### Previous Conversation:\n{formatted_chat_history}\n\n"
-            f"### User Question:\n{user_question}\n\n"
+            f"### Chat History:\n{formatted_history}\n\n"
+            f"### Current Question:\n{user_question}\n\n"
         )
 
-        if pdf_text:
-            prompt += f"### Uploaded Legal Document Content:\n{pdf_text[:1500]}...\n\n"
+        # Get response
+        response = stream_llama_response(prompt)
+        formatted_response = format_response(response)
         
-        if doc_context:
-            prompt += f"### Relevant Legal References:\n{doc_context}\n\n"
-        else:
-            prompt += "No relevant documents were found. Provide a general legal response.\n\n"
-
-        prompt += (
-            "### First Line is always going to be a query, write a response according to the first line\n"
-            "### Response Guidelines:\n"
-            "- If the query involves sensitive topics (e.g., domestic violence, criminal law, family disputes), provide "
-            "general legal guidance rather than specific legal advice.\n"
-            "- Offer information on legal rights, resources, and support services.\n"
-            "- Suggest seeking professional legal assistance if needed.\n"
-            "- Always maintain an informative, supportive, and professional tone.\n\n"
-            "**Response Format:**\n"
-            "**1. Summary of the Legal Issue**\n"
-            "**2. Legal Rights & Options Available**\n"
-            "**3. Steps the User Can Take**\n"
-            "**4. Additional Resources for Further Help**\n\n"
-            "Write in a professional yet conversational style."
-        )
-        prompt+= (
-            "You are a helpful chatbot that remembers user inputs during a conversation.\n\n " 
-            "If the user shares personal details like their name, preferences, or facts about themselves, store them and recall them when relevant. \n\n" 
-            "If the user asks about something they previously mentioned, retrieve the stored information and respond accordingly.\n\n"  
-            "If you don’t remember something, politely ask the user to repeat it.\n\n " 
-        )
-
-        response_stream = stream_llama_response(prompt)
-        full_response = "".join(part for part in response_stream)
-
-        # ✅ Store assistant response in chat history
-        chat_history.append({"role": "assistant", "content": full_response})
-        session["chat_history"] = chat_history[-5:]  # Save last 5 exchanges
-
-        return Response(stream_llama_response(prompt), content_type='text/event-stream; charset=utf-8')
+        # Save assistant's response
+        save_chat_message(session_id, "assistant", response)
+        
+        return jsonify({
+            "response": formatted_response,
+            "success": True
+        }), 200
 
     except Exception as e:
-        logger.error(f"Error generating response: {e}")
-        return jsonify({"error": f"Error generating response: {str(e)}"}), 500
+        logger.error(f"Error processing query: {e}")
+        return jsonify({
+            "error": str(e),
+            "success": False
+        }), 500
+
+@app.route("/chat_history/<session_id>", methods=["GET"])
+def get_session_history(session_id):
+    try:
+        history = get_chat_history(session_id)
+        return jsonify({"history": history}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(port=8080, debug=True)
